@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Block Lines</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #15120f; }
+  body {
+    min-height: 100vh;
+    background: radial-gradient(circle at 30% 12%, #2a231b 0%, #15120f 70%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 28px 16px; font-family: -apple-system, Helvetica, Arial, sans-serif; color: #e8ddc8;
+  }
+  .eyebrow { font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: #b8763e; font-weight: 600; }
+  .title { font-family: Georgia, serif; font-size: 28px; font-weight: 600; color: #f0e6d2; margin: 4px 0 16px; }
+  .level-pill { font-size: 13px; font-weight: 700; padding: 5px 14px; border-radius: 999px; background: #b8763e; color: #1a1510; }
+  .stat-label { font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: #8c8478; }
+  .stat-value { font-size: 17px; font-weight: 700; color: #e8ddc8; }
+  .progress-track { width: 200px; height: 7px; border-radius: 999px; background: #2a241c; overflow: hidden; margin-top: 6px; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, #b8763e, #e8a23c); transition: width .3s ease; }
+  .cell { border-radius: 6px; transition: background .15s ease, box-shadow .15s ease; }
+  .cell.flash { animation: flashPulse .26s ease-out; }
+  @keyframes flashPulse { 0% { filter: brightness(1); } 45% { filter: brightness(2.3); } 100% { filter: brightness(1); } }
+  .tray-slot { width: 30%; aspect-ratio: 1/1; display: flex; align-items: center; justify-content: center; border-radius: 14px; background: linear-gradient(160deg, #241d14 0%, #1a1510 100%); border: 1px solid #3a3022; touch-action: none; cursor: grab; position: relative; }
+  .ctrl-btn { font-size: 13px; font-weight: 600; padding: 9px 20px; border-radius: 10px; border: 1px solid #4a3e2c; background: #221c15; color: #e8ddc8; cursor: pointer; }
+  .hint { font-size: 11.5px; color: #756d5e; margin-top: 12px; }
+  .board-wrap { position: relative; width: min(92vw, 380px); aspect-ratio: 1/1; background: linear-gradient(160deg, #3a2f20 0%, #241d14 100%); border-radius: 18px; padding: 3%; box-shadow: 0 0 0 1px #4a3e2c, 0 12px 30px rgba(0,0,0,0.5); }
+  .board-grid { display: grid; gap: 3px; width: 100%; height: 100%; }
+  .overlay { position: absolute; inset: 0; border-radius: 14px; background: rgba(21,18,15,0.88); display: none; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 20px; text-align: center; }
+  .overlay.show { display: flex; }
+  .overlay-title { font-family: Georgia, serif; font-size: 24px; color: #f0c98a; }
+  .overlay-sub { font-size: 13px; color: #c9bfa8; }
+  .ghost { position: fixed; pointer-events: none; z-index: 50; display: none; filter: drop-shadow(0 6px 10px rgba(0,0,0,0.5)); }
+  .ghost-cell { position: absolute; border-radius: 6px; opacity: 0.92; box-shadow: inset 0 2px 3px rgba(255,255,255,0.4), inset 0 -3px 4px rgba(0,0,0,0.35); }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Fill · Clear · Advance</div>
+  <div class="title">Block Lines</div>
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+    <span class="level-pill" id="levelPill">Level 1 / 10</span>
+  </div>
+  <div style="display:flex;flex-direction:column;align-items:center;margin-bottom:14px">
+    <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+    <div class="hint" id="linesLabel" style="margin-top:5px">0 / 3 lines cleared</div>
+  </div>
+  <div style="display:flex;gap:32px;margin-bottom:18px">
+    <div style="text-align:center"><div class="stat-label">Score</div><div class="stat-value" id="scoreVal">0</div></div>
+    <div style="text-align:center"><div class="stat-label">Best</div><div class="stat-value" id="bestVal">0</div></div>
+  </div>
+
+  <div class="board-wrap">
+    <div class="board-grid" id="boardGrid"></div>
+    <div class="overlay" id="overlay">
+      <div class="overlay-title" id="overlayTitle"></div>
+      <div class="overlay-sub" id="overlaySub"></div>
+      <button class="ctrl-btn" id="overlayBtn" style="margin-top:8px"></button>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:10px;width:min(92vw, 380px);justify-content:space-between;margin-top:20px" id="tray"></div>
+  <div class="hint">Drag a block onto the board</div>
+  <div style="margin-top:16px"><button class="ctrl-btn" id="newGameBtn">New Game</button></div>
+  <div class="ghost" id="ghost"></div>
+
+<script>
+const GRID_SIZE = 8;
+const MAX_LEVEL = 10;
+
+const COLORS = [
+  { base: '#E0524B', light: '#F08077', dark: '#A83730' },
+  { base: '#E8A23C', light: '#F5C170', dark: '#B97A22' },
+  { base: '#4FA876', light: '#7BC79C', dark: '#327A54' },
+  { base: '#4A7FD6', light: '#7AA3E8', dark: '#2F5BA8' },
+  { base: '#9B6FD1', light: '#BB9AE3', dark: '#7249A8' },
+  { base: '#3FB8B0', light: '#6FD4CC', dark: '#287E78' },
+];
+
+const SHAPES = [
+  [[0,0]], [[0,0],[0,1]], [[0,0],[1,0]], [[0,0],[0,1],[0,2]], [[0,0],[1,0],[2,0]],
+  [[0,0],[1,0],[1,1]], [[0,0],[0,1],[1,0]], [[0,0],[0,1],[1,1]], [[1,0],[1,1],[0,1]],
+  [[0,0],[0,1],[1,0],[1,1]], [[0,0],[0,1],[0,2],[0,3]], [[0,0],[1,0],[2,0],[3,0]],
+  [[0,0],[0,1],[0,2],[0,3],[0,4]], [[0,0],[1,0],[2,0],[3,0],[4,0]],
+  [[0,0],[0,1],[0,2],[1,1]], [[1,0],[1,1],[1,2],[0,1]], [[0,0],[1,0],[2,0],[1,1]],
+  [[0,1],[1,1],[2,1],[1,0]], [[0,1],[0,2],[1,0],[1,1]], [[0,0],[0,1],[1,1],[1,2]],
+  [[0,0],[1,0],[2,0],[2,1]], [[0,0],[0,1],[1,0],[2,0]], [[0,0],[0,1],[1,1],[2,1]],
+  [[2,0],[2,1],[1,1],[0,1]], [[0,1],[1,0],[1,1],[1,2],[2,1]],
+];
+
+function emptyBoard() { return Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(null)); }
+function shapeDims(shape) {
+  const rows = Math.max(...shape.map(p => p[0])) + 1;
+  const cols = Math.max(...shape.map(p => p[1])) + 1;
+  return { rows, cols };
+}
+function canPlaceAt(board, shape, ar, ac) {
+  for (const [dr, dc] of shape) {
+    const r = ar + dr, c = ac + dc;
+    if (r < 0 || r >= GRID_SIZE || c < 0 || c >= GRID_SIZE) return false;
+    if (board[r][c]) return false;
+  }
+  return true;
+}
+function findAnyValidPosition(board, shape) {
+  for (let r = 0; r < GRID_SIZE; r++) for (let c = 0; c < GRID_SIZE; c++) if (canPlaceAt(board, shape, r, c)) return true;
+  return false;
+}
+function levelTarget(level) { return level + 2; }
+function cellBoxShadow(filled, previewState) {
+  const layers = filled
+    ? ['inset 0 2px 3px rgba(255,255,255,0.35)', 'inset 0 -3px 4px rgba(0,0,0,0.35)']
+    : ['inset 0 2px 4px rgba(0,0,0,0.55)', 'inset 0 -1px 0 rgba(255,255,255,0.04)'];
+  if (previewState === 'valid') layers.push('inset 0 0 0 3px #6fcf73');
+  if (previewState === 'invalid') layers.push('inset 0 0 0 3px #e2574c');
+  return layers.join(', ');
+}
+
+let idCounter = 0;
+function generatePiece() {
+  const shape = SHAPES[Math.floor(Math.random() * SHAPES.length)];
+  const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+  idCounter += 1;
+  return { id: idCounter, shape, color };
+}
+function generateThree() { return [generatePiece(), generatePiece(), generatePiece()]; }
+
+let board = emptyBoard();
+let tray = generateThree();
+let level = 1;
+let linesInLevel = 0;
+let score = 0;
+let best = 0;
+let locked = false;
+let drag = null;
+let lastPreviewKeys = [];
+
+const boardGridEl = document.getElementById('boardGrid');
+const trayEl = document.getElementById('tray');
+const ghostEl = document.getElementById('ghost');
+const overlayEl = document.getElementById('overlay');
+const cellEls = [];
+
+function buildBoardDOM() {
+  boardGridEl.style.gridTemplateColumns = `repeat(${GRID_SIZE}, 1fr)`;
+  boardGridEl.style.gridTemplateRows = `repeat(${GRID_SIZE}, 1fr)`;
+  boardGridEl.innerHTML = '';
+  for (let r = 0; r < GRID_SIZE; r++) {
+    cellEls.push([]);
+    for (let c = 0; c < GRID_SIZE; c++) {
+      const div = document.createElement('div');
+      div.className = 'cell';
+      boardGridEl.appendChild(div);
+      cellEls[r].push(div);
+    }
+  }
+}
+
+function updateCell(r, c) {
+  const filled = board[r][c];
+  const bg = filled
+    ? `linear-gradient(160deg, ${filled.light} 0%, ${filled.base} 55%, ${filled.dark} 100%)`
+    : '#1c1814';
+  cellEls[r][c].style.background = bg;
+  cellEls[r][c].style.boxShadow = cellBoxShadow(!!filled, null);
+}
+
+function redrawAllCells() {
+  for (let r = 0; r < GRID_SIZE; r++) for (let c = 0; c < GRID_SIZE; c++) updateCell(r, c);
+}
+
+function clearPreview() {
+  lastPreviewKeys.forEach(([r, c]) => updateCell(r, c));
+  lastPreviewKeys = [];
+}
+
+function applyPreview(cells, valid) {
+  clearPreview();
+  cells.forEach(([r, c]) => {
+    if (r < 0 || r >= GRID_SIZE || c < 0 || c >= GRID_SIZE) return;
+    const filled = board[r][c];
+    cellEls[r][c].style.boxShadow = cellBoxShadow(!!filled, valid ? 'valid' : 'invalid');
+    lastPreviewKeys.push([r, c]);
+  });
+}
+
+function renderHeader() {
+  document.getElementById('levelPill').textContent = `Level ${level} / ${MAX_LEVEL}`;
+  const target = levelTarget(level);
+  const pct = Math.min(100, (linesInLevel / target) * 100);
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('linesLabel').textContent = `${linesInLevel} / ${target} lines cleared`;
+  document.getElementById('scoreVal').textContent = score;
+  document.getElementById('bestVal').textContent = best;
+}
+
+function miniShapeHTML(shape, color, slotPx) {
+  const { rows, cols } = shapeDims(shape);
+  let inner = '';
+  shape.forEach(([r, c]) => {
+    inner += `<div style="position:absolute;left:${(c/cols)*100}%;top:${(r/rows)*100}%;width:${100/cols}%;height:${100/rows}%;padding:2px;">
+      <div style="width:100%;height:100%;border-radius:4px;background:linear-gradient(160deg, ${color.light} 0%, ${color.base} 55%, ${color.dark} 100%);box-shadow:inset 0 2px 2px rgba(255,255,255,0.35), inset 0 -2px 3px rgba(0,0,0,0.3);"></div>
+    </div>`;
+  });
+  return `<div style="position:relative;width:${(cols/slotPx)*100}%;height:${(rows/slotPx)*100}%;">${inner}</div>`;
+}
+
+function renderTray() {
+  trayEl.innerHTML = '';
+  tray.forEach((piece, slotIndex) => {
+    const slot = document.createElement('div');
+    slot.className = 'tray-slot';
+    if (piece && !(drag && drag.slotIndex === slotIndex)) {
+      slot.innerHTML = miniShapeHTML(piece.shape, piece.color, 5);
+    }
+    slot.addEventListener('pointerdown', (e) => handlePieceDown(e, slotIndex));
+    slot.addEventListener('pointermove', handlePieceMove);
+    slot.addEventListener('pointerup', handlePieceUp);
+    slot.addEventListener('pointercancel', () => { drag = null; hideGhost(); clearPreview(); renderTray(); });
+    trayEl.appendChild(slot);
+  });
+}
+
+function showGhost() {
+  if (!drag) return;
+  const cellPx = 38;
+  const { rows, cols } = drag.dims;
+  ghostEl.style.display = 'block';
+  ghostEl.style.left = drag.x + 'px';
+  ghostEl.style.top = (drag.y - drag.liftY) + 'px';
+  ghostEl.style.transform = 'translate(-50%, -50%) scale(1.05)';
+  ghostEl.style.width = (cols * cellPx) + 'px';
+  ghostEl.style.height = (rows * cellPx) + 'px';
+  let inner = '';
+  drag.shape.forEach(([r, c]) => {
+    inner += `<div class="ghost-cell" style="left:${c*cellPx}px;top:${r*cellPx}px;width:${cellPx-3}px;height:${cellPx-3}px;background:linear-gradient(160deg, ${drag.color.light} 0%, ${drag.color.base} 55%, ${drag.color.dark} 100%);"></div>`;
+  });
+  ghostEl.innerHTML = inner;
+}
+
+function hideGhost() {
+  ghostEl.style.display = 'none';
+  ghostEl.innerHTML = '';
+}
+
+function getAnchor(clientX, clientY) {
+  const rect = boardGridEl.getBoundingClientRect();
+  const cellPx = rect.width / GRID_SIZE;
+  const adjY = clientY - drag.liftY;
+  const anchorCol = Math.round((clientX - rect.left) / cellPx - drag.dims.cols / 2);
+  const anchorRow = Math.round((adjY - rect.top) / cellPx - drag.dims.rows / 2);
+  return { anchorRow, anchorCol };
+}
+
+function handlePieceDown(e, slotIndex) {
+  if (locked) return;
+  const piece = tray[slotIndex];
+  if (!piece) return;
+  e.preventDefault();
+  try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+  drag = {
+    slotIndex, shape: piece.shape, color: piece.color, dims: shapeDims(piece.shape),
+    liftY: e.pointerType === 'touch' ? 80 : 0, x: e.clientX, y: e.clientY, pointerId: e.pointerId,
+  };
+  e.currentTarget.innerHTML = '';
+  showGhost();
+  updatePreviewFromDrag();
+}
+
+function handlePieceMove(e) {
+  if (!drag || e.pointerId !== drag.pointerId) return;
+  e.preventDefault();
+  drag.x = e.clientX;
+  drag.y = e.clientY;
+  showGhost();
+  updatePreviewFromDrag();
+}
+
+function updatePreviewFromDrag() {
+  const { anchorRow, anchorCol } = getAnchor(drag.x, drag.y);
+  const valid = canPlaceAt(board, drag.shape, anchorRow, anchorCol);
+  const cells = drag.shape.map(([dr, dc]) => [anchorRow + dr, anchorCol + dc]);
+  applyPreview(cells, valid);
+}
+
+function handlePieceUp(e) {
+  if (!drag || e.pointerId !== drag.pointerId) return;
+  const { anchorRow, anchorCol } = getAnchor(drag.x, drag.y);
+  if (canPlaceAt(board, drag.shape, anchorRow, anchorCol)) {
+    commitPlacement(drag.slotIndex, drag.shape, drag.color, anchorRow, anchorCol);
+  }
+  drag = null;
+  hideGhost();
+  clearPreview();
+  renderTray();
+}
+
+function commitPlacement(slotIndex, shape, color, ar, ac) {
+  shape.forEach(([dr, dc]) => { board[ar + dr][ac + dc] = color; });
+
+  const fullRows = [];
+  for (let r = 0; r < GRID_SIZE; r++) if (board[r].every(c => c)) fullRows.push(r);
+  const fullCols = [];
+  for (let c = 0; c < GRID_SIZE; c++) if (board.every(row => row[c])) fullCols.push(c);
+  const linesCleared = fullRows.length + fullCols.length;
+
+  redrawAllCells();
+
+  if (linesCleared > 0) {
+    const flashCells = [];
+    fullRows.forEach(r => { for (let c = 0; c < GRID_SIZE; c++) flashCells.push([r, c]); });
+    fullCols.forEach(c => { for (let r = 0; r < GRID_SIZE; r++) flashCells.push([r, c]); });
+    flashCells.forEach(([r, c]) => cellEls[r][c].classList.add('flash'));
+    setTimeout(() => {
+      fullRows.forEach(r => { for (let c = 0; c < GRID_SIZE; c++) board[r][c] = null; });
+      fullCols.forEach(c => { for (let r = 0; r < GRID_SIZE; r++) board[r][c] = null; });
+      flashCells.forEach(([r, c]) => cellEls[r][c].classList.remove('flash'));
+      redrawAllCells();
+    }, 260);
+  }
+
+  score += shape.length + linesCleared * linesCleared * 10;
+  best = Math.max(best, score);
+
+  tray[slotIndex] = null;
+  if (tray.every(p => p === null)) tray = generateThree();
+  renderTray();
+
+  linesInLevel += linesCleared;
+  renderHeader();
+
+  if (linesInLevel >= levelTarget(level)) {
+    if (level >= MAX_LEVEL) {
+      showOverlay('All 10 Levels Complete!', `Final score ${score}`, 'Play Again', resetGame);
+    } else {
+      showOverlay(`Level ${level} Complete!`, `Score ${score}`, 'Next Level', nextLevel);
+    }
+    locked = true;
+    return;
+  }
+
+  const clearedBoardForCheck = board;
+  const anyPlayable = tray.some(p => p && findAnyValidPosition(clearedBoardForCheck, p.shape));
+  if (!anyPlayable) {
+    showOverlay('Game Over', `Reached level ${level} · Score ${score}`, 'Try Again', resetGame);
+    locked = true;
+  }
+}
+
+function showOverlay(title, sub, actionLabel, actionFn) {
+  document.getElementById('overlayTitle').textContent = title;
+  document.getElementById('overlaySub').textContent = sub;
+  const btn = document.getElementById('overlayBtn');
+  btn.textContent = actionLabel;
+  btn.onclick = () => { hideOverlay(); actionFn(); };
+  overlayEl.classList.add('show');
+}
+function hideOverlay() { overlayEl.classList.remove('show'); locked = false; }
+
+function nextLevel() {
+  level += 1;
+  board = emptyBoard();
+  linesInLevel = 0;
+  tray = generateThree();
+  redrawAllCells();
+  renderTray();
+  renderHeader();
+}
+
+function resetGame() {
+  level = 1;
+  board = emptyBoard();
+  tray = generateThree();
+  score = 0;
+  linesInLevel = 0;
+  drag = null;
+  hideGhost();
+  redrawAllCells();
+  renderTray();
+  renderHeader();
+}
+
+document.getElementById('newGameBtn').addEventListener('click', resetGame);
+
+buildBoardDOM();
+redrawAllCells();
+renderTray();
+renderHeader();
+</script>
+</body>
+</html>
